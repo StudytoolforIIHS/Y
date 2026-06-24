@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no" />
+  <meta name="color-scheme" content="dark" />
+  <title>FreeProxy &mdash; Search the web freely</title>
+  <meta name="description" content="An open-source client-side web proxy powered by Scramjet & bare-mux. Deployable for free on Netlify." />
+
+  <!--
+    ============================================================================
+    CDN DEPENDENCIES
+    ============================================================================
+    These bundles are pulled from jsDelivr so that the app is 100% static and
+    needs no build step. They MUST be imported in this exact order:
+
+      1. bare-mux           -> exposes the global `BareMux`
+      2. libcurl transport  -> the Wisp/Bare WebSocket transport (loaded lazily
+                                inside script.js via setTransport, so only the
+                                controller + bare-mux need to be present here)
+      3. scramjet "all"     -> exposes the globals `$scramjetLoadController`
+                                and `__scramjet$config`
+
+    Versions are pinned for reproducibility on Netlify.
+    ============================================================================
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/@mercuryworkshop/bare-mux@2.1.7/dist/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mercuryworkshop/scramjet@1.1.0/dist/scramjet.all.js"></script>
+
+  <style>
+    :root {
+      --bg: #0d1117;
+      --bg-elev: #161b22;
+      --bg-input: #1c2430;
+      --border: #30363d;
+      --border-focus: #58a6ff;
+      --text: #e6edf3;
+      --text-dim: #8b949e;
+      --accent: #58a6ff;
+      --accent-grad-1: #6e8efb;
+      --accent-grad-2: #a777e3;
+      --danger: #f85149;
+      --radius: 16px;
+      --shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                   Helvetica, Arial, sans-serif, "Apple Color Emoji";
+      background:
+        radial-gradient(1200px 600px at 50% -10%, rgba(110, 142, 251, 0.18), transparent 60%),
+        radial-gradient(900px 500px at 80% 110%, rgba(167, 119, 227, 0.12), transparent 55%),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    main.search-shell {
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+      animation: rise 0.6s ease both;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ---------------- Brand / logo ---------------- */
+    .brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      user-select: none;
+    }
+
+    .brand-mark {
+      width: 64px;
+      height: 64px;
+      border-radius: 18px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, var(--accent-grad-1), var(--accent-grad-2));
+      box-shadow: 0 8px 30px rgba(110, 142, 251, 0.35);
+    }
+
+    .brand-mark svg { width: 34px; height: 34px; fill: #fff; }
+
+    .brand-title {
+      font-size: clamp(2.2rem, 6vw, 3.2rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      background: linear-gradient(90deg, #fff, var(--accent));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-sub {
+      color: var(--text-dim);
+      font-size: 0.95rem;
+      text-align: center;
+    }
+
+    /* ---------------- Search bar ---------------- */
+    form#search-form { width: 100%; }
+
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 6px 6px 20px;
+      box-shadow: var(--shadow);
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    }
+
+    .search-bar:focus-within {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.15), var(--shadow);
+      transform: translateY(-1px);
+    }
+
+    .search-bar .icon {
+      width: 20px;
+      height: 20px;
+      fill: var(--text-dim);
+      flex-shrink: 0;
+    }
+
+    input#address-input {
+      flex: 1;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 1.05rem;
+      padding: 14px 4px;
+    }
+
+    input#address-input::placeholder { color: var(--text-dim); }
+
+    button#go-button {
+      flex-shrink: 0;
+      border: none;
+      cursor: pointer;
+      height: 46px;
+      padding: 0 22px;
+      border-radius: 999px;
+      font-size: 0.98rem;
+      font-weight: 600;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent-grad-1), var(--accent-grad-2));
+      transition: filter 0.15s ease, transform 0.05s ease;
+    }
+
+    button#go-button:hover { filter: brightness(1.08); }
+    button#go-button:active { transform: scale(0.97); }
+    button#go-button:disabled { opacity: 0.6; cursor: progress; }
+
+    /* ---------------- Quick links ---------------- */
+    .quick-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+    }
+
+    .quick-links button {
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+      color: var(--text-dim);
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .quick-links button:hover {
+      color: var(--text);
+      border-color: var(--accent);
+      background: #1f2630;
+    }
+
+    /* ---------------- Status / errors ---------------- */
+    #status {
+      min-height: 22px;
+      font-size: 0.9rem;
+      text-align: center;
+      color: var(--text-dim);
+    }
+
+    #status.error { color: var(--danger); }
+
+    #status .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      margin-right: 8px;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      vertical-align: -2px;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---------------- Footer ---------------- */
+    footer {
+      position: fixed;
+      bottom: 18px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 480px) {
+      button#go-button { padding: 0 16px; }
+      .search-bar { padding-left: 16px; }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="search-shell">
+    <header class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.93 8ZM12 4c.83 1.2 1.48 2.53 1.91 4h-3.82c.43-1.47 1.08-2.8 1.91-4ZM4.26 14a7.96 7.96 0 0 1 0-4h3.38a16.5 16.5 0 0 0 0 4H4.26Zm.81 2h2.95c.37 1.28.84 2.48 1.38 3.56A8.03 8.03 0 0 1 5.07 16Zm2.95-8H5.07a8.03 8.03 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.02 8ZM12 20c-.83-1.2-1.48-2.53-1.91-4h3.82c-.43 1.47-1.08 2.8-1.91 4Zm2.36-6H9.64a14.34 14.34 0 0 1 0-4h4.72a14.34 14.34 0 0 1 0 4Zm.25 5.56c.54-1.08 1.01-2.28 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56ZM16.36 14a16.5 16.5 0 0 0 0-4h3.38a7.96 7.96 0 0 1 0 4h-3.38Z"/></svg>
+      </span>
+      <h1 class="brand-title">FreeProxy</h1>
+      <p class="brand-sub">Browse the open web from anywhere &mdash; powered by Scramjet</p>
+    </header>
+
+    <form id="search-form" autocomplete="off" role="search">
+      <div class="search-bar">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5Zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14Z"/></svg>
+        <input
+          id="address-input"
+          name="address"
+          type="text"
+          placeholder="Search the web freely..."
+          aria-label="Search the web freely"
+          autofocus
+          spellcheck="false"
+        />
+        <button id="go-button" type="submit">Go</button>
+      </div>
+    </form>
+
+    <nav class="quick-links" aria-label="Quick links">
+      <button type="button" data-url="https://www.google.com">Google</button>
+      <button type="button" data-url="https://www.wikipedia.org">Wikipedia</button>
+      <button type="button" data-url="https://www.youtube.com">YouTube</button>
+      <button type="button" data-url="https://www.reddit.com">Reddit</button>
+      <button type="button" data-url="https://github.com">GitHub</button>
+    </nav>
+
+    <p id="status" role="status" aria-live="polite"></p>
+  </main>
+
+  <footer>
+    Open-source &amp; client-side &middot; Built with
+    <a href="https://github.com/MercuryWorkshop/scramjet" target="_blank" rel="noopener">Scramjet</a>
+    &amp;
+    <a href="https://github.com/MercuryWorkshop/bare-mux" target="_blank" rel="noopener">bare-mux</a>
+  </footer>
+
+  <!-- App logic. Loaded last so the CDN globals already exist. -->
+  <script src="./script.js" defer></script>
+</body>
+</html>
